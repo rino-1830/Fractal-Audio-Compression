@@ -19,10 +19,10 @@ def _prepare_domains(audio: cp.ndarray, block_size: int, search_step: int):
     starts = cp.arange(0, length - 2 * block_size + 1, search_step, dtype=cp.int32)
     # インデックスをまとめて生成してdomainブロックを取得
     idx = starts[:, None] + cp.arange(0, 2 * block_size, 2, dtype=cp.int32)
-    domains = audio[idx]
-    means = cp.mean(domains, axis=1)
+    domains = audio[idx].astype(cp.float32)
+    means = cp.mean(domains, axis=1, dtype=cp.float32)
     centered = domains - means[:, None]
-    variances = cp.sum(centered**2, axis=1)
+    variances = cp.sum(centered**2, axis=1, dtype=cp.float32)
     return domains, centered, means, variances, starts
 
 
@@ -40,14 +40,14 @@ def compress(audio: cp.ndarray, block_size: int = 1024, search_step: int = 512):
     )
     num_blocks = int(length) // block_size
     best_starts = cp.empty(num_blocks, dtype=cp.int32)
-    best_scales = cp.empty(num_blocks, dtype=cp.float64)
-    best_offsets = cp.empty(num_blocks, dtype=cp.float64)
+    best_scales = cp.empty(num_blocks, dtype=cp.float32)
+    best_offsets = cp.empty(num_blocks, dtype=cp.float32)
     # 残り予測時間を表示するため tqdm オブジェクトを変数として保持
     pbar = tqdm(range(0, int(length), block_size), desc="compress")
     # 音源をrangeブロックに分割して処理
     for i, start in enumerate(pbar):
-        range_block = audio[start : start + block_size]
-        r_mean = cp.mean(range_block)
+        range_block = audio[start : start + block_size].astype(cp.float32)
+        r_mean = cp.mean(range_block, dtype=cp.float32)
         y = range_block - r_mean
         # 全domainブロックに対する線形回帰をまとめて計算
         # 分散が0の場合は係数を0とし、警告を抑制する
@@ -55,12 +55,12 @@ def compress(audio: cp.ndarray, block_size: int = 1024, search_step: int = 512):
             s = cp.divide(
                 centered @ y,
                 variances,
-                out=cp.zeros_like(variances, dtype=float),
+                out=cp.zeros_like(variances, dtype=cp.float32),
                 where=variances != 0,
             )
         o = r_mean - s * means
         approx = s[:, None] * domains + o[:, None]
-        errs = cp.mean((range_block - approx) ** 2, axis=1)
+        errs = cp.mean((range_block - approx) ** 2, axis=1, dtype=cp.float32)
         idx = cp.argmin(errs)
         best_starts[i] = starts[idx]
         best_scales[i] = s[idx]
@@ -90,8 +90,8 @@ def _prepare_decompress(params, scale: int = 1):
     block_size = params["block_size"]
     transforms = params["transforms"]
     d_starts = cp.asarray([t[0] for t in transforms], dtype=cp.int32) * scale
-    scales = cp.asarray([t[1] for t in transforms], dtype=cp.float64)
-    offsets = cp.asarray([t[2] for t in transforms], dtype=cp.float64)
+    scales = cp.asarray([t[1] for t in transforms], dtype=cp.float32)
+    offsets = cp.asarray([t[2] for t in transforms], dtype=cp.float32)
     r_starts = cp.arange(0, params["length"], block_size, dtype=cp.int32) * scale
     # domainブロックの長さを倍率に合わせて拡大し、2サンプルおきに参照
     domain_idx = d_starts[:, None] + cp.arange(
@@ -107,7 +107,7 @@ def decompress(params, iterations: int = 8, scale: int = 1):
     orig_length = params.get("orig_length", params["length"]) * scale
     domain_idx, range_idx, scales, offsets = _prepare_decompress(params, scale)
     # 初期値としてゼロ波形を用意
-    audio = cp.zeros(length, dtype=cp.float64)
+    audio = cp.zeros(length, dtype=cp.float32)
     new_audio = cp.zeros_like(audio)
     # 進捗から残り時間を得るため tqdm オブジェクトを保持
     pbar = tqdm(range(iterations), desc="decompress")
@@ -133,7 +133,7 @@ def load_wav(path: str):
     rate, data = wavfile.read(path)
     if data.ndim == 1:
         data = np.stack([data, data], axis=-1)
-    return rate, cp.asarray(data.astype(np.float64))
+    return rate, cp.asarray(data.astype(np.float32))
 
 
 def save_wav(path: str, rate: int, data: cp.ndarray):
@@ -149,7 +149,7 @@ def calc_mse(original: cp.ndarray, restored: cp.ndarray) -> float:
     """元音源と復元音源の平均二乗誤差を計算する"""
     min_len = min(original.shape[0], restored.shape[0])
     diff = original[:min_len] - restored[:min_len]
-    return float(cp.mean(diff**2).get())
+    return float(cp.mean(diff**2, dtype=cp.float32).get())
 
 
 if __name__ == "__main__":

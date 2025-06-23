@@ -61,3 +61,9 @@ python fractal_audio_compression.py input.wav output.wav \
 アルゴリズム自体は同じため音質への影響はほとんどありません。
 さらにブロックの代入をまとめて行うよう改善し、
 わずかながら復元時間を短縮しました。
+
+## GPU版について
+
+`fractal_audio_compression_GPU.py` は CuPy を利用した GPU 対応版です。
+計算は単精度 (`float32`) で行うことでメモリ使用量を削減しています。
+利用する際は CUDA 対応 GPU と CuPy のインストールが必要です。
