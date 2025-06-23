@@ -114,7 +114,13 @@ if __name__ == "__main__":
         rate, data = load_wav(args.input)
         left_params = compress(data[:, 0])
         right_params = compress(data[:, 1])
-        np.savez(args.params, left=left_params, right=right_params, rate=rate)
+        # dictをそのまま渡すと型検査で怒られるため、object配列に変換して保存
+        np.savez(
+            args.params,
+            left=np.array(left_params, dtype=object),
+            right=np.array(right_params, dtype=object),
+            rate=rate,
+        )
     else:
         # 保存しておいたパラメータから音源を復元
         npz = np.load(args.params, allow_pickle=True)
