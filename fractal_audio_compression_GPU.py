@@ -12,6 +12,26 @@ import numpy as np  # ファイル入出力のためにNumPyも使用
 from scipy.io import wavfile
 from tqdm import tqdm
 
+# cp.errstate が存在しない場合に備えて代替を定義
+try:
+    cp.errstate  # type: ignore[attr-defined]
+    errstate = cp.errstate
+except AttributeError:  # 古いCuPyでは errstate がない
+    from contextlib import contextmanager
+
+    @contextmanager
+    def errstate(**kwargs):
+        """NumPy の errstate と互換の簡易実装"""
+        if hasattr(cp, "seterr"):
+            old = cp.seterr(**kwargs)
+        else:
+            old = None
+        try:
+            yield
+        finally:
+            if old is not None:
+                cp.seterr(**old)
+
 
 def _prepare_domains(audio: cp.ndarray, block_size: int, search_step: int):
     """domainブロックと統計量をGPU上で計算しておく"""
@@ -51,7 +71,8 @@ def compress(audio: cp.ndarray, block_size: int = 1024, search_step: int = 512):
         y = range_block - r_mean
         # 全domainブロックに対する線形回帰をまとめて計算
         # 分散が0の場合は係数を0とし、警告を抑制する
-        with cp.errstate(divide="ignore", invalid="ignore"):
+        # CuPy に errstate がない環境でも動作するよう独自実装を利用
+        with errstate(divide="ignore", invalid="ignore"):
             s = cp.divide(
                 centered @ y,
                 variances,
