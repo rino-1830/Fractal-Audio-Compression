@@ -131,6 +131,13 @@ def save_wav(path: str, rate: int, data: np.ndarray):
     wavfile.write(path, rate, clipped)
 
 
+def calc_mse(original: np.ndarray, restored: np.ndarray) -> float:
+    """元音源と復元音源の平均二乗誤差を計算する"""
+    min_len = min(original.shape[0], restored.shape[0])
+    diff = original[:min_len] - restored[:min_len]
+    return float(np.mean(diff**2))
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -138,7 +145,9 @@ if __name__ == "__main__":
     parser.add_argument("input", help="入力WAVファイル")
     parser.add_argument("output", help="出力WAVファイル")
     parser.add_argument(
-        "--mode", choices=["compress", "decompress"], default="compress"
+        "--mode",
+        choices=["compress", "decompress", "evaluate"],
+        default="compress",
     )
     parser.add_argument(
         "--params", help="パラメータ保存/読込ファイル", default="params.npz"
@@ -168,7 +177,7 @@ if __name__ == "__main__":
             right=np.array(right_params, dtype=object),
             rate=rate,
         )
-    else:
+    elif args.mode == "decompress":
         # 保存しておいたパラメータから音源を復元
         npz = np.load(args.params, allow_pickle=True)
         left_params = npz["left"].item()
@@ -178,3 +187,16 @@ if __name__ == "__main__":
         right = decompress(right_params, iterations=args.iterations, scale=args.scale)
         stereo = np.stack([left, right], axis=-1)
         save_wav(args.output, rate * args.scale, stereo)
+    else:
+        # パラメータから復元し、元音源との誤差を計算
+        rate, original = load_wav(args.input)
+        npz = np.load(args.params, allow_pickle=True)
+        left_params = npz["left"].item()
+        right_params = npz["right"].item()
+        rate_p = int(npz["rate"])
+        left = decompress(left_params, iterations=args.iterations, scale=args.scale)
+        right = decompress(right_params, iterations=args.iterations, scale=args.scale)
+        stereo = np.stack([left, right], axis=-1)
+        save_wav(args.output, rate_p * args.scale, stereo)
+        mse = calc_mse(original, stereo)
+        print(f"平均二乗誤差: {mse}")

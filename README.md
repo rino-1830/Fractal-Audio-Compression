@@ -31,6 +31,17 @@ python fractal_audio_compression.py dummy.wav output.wav \
 フラクタル圧縮の特性上、任意の倍率でのアップスケーリングが可能です。
 復元時には圧縮時のパディングが自動的に除去されます。
 
+### 評価
+
+```bash
+python fractal_audio_compression.py input.wav output.wav \
+    --mode evaluate --params params.npz \
+    --iterations 8
+```
+
+保存されたパラメータから音源を復元し、
+元ファイルとの平均二乗誤差を表示します。
+
 ## パラメータの影響
 
 | オプション | 値を大きくすると | 値を小さくすると |
