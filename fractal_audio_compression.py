@@ -11,17 +11,19 @@ import numpy as np
 from scipy.io import wavfile
 
 
-def _linear_regression(x: np.ndarray, y: np.ndarray):
-    """xからyへの線形変換係数(s, o)を求める"""
-    # 単純な最小二乗法による係数推定
-    x_mean = np.mean(x)
-    y_mean = np.mean(y)
-    var = np.sum((x - x_mean) ** 2)
-    if var == 0:
-        return 0.0, y_mean
-    s = np.sum((x - x_mean) * (y - y_mean)) / var
-    o = y_mean - s * x_mean
-    return s, o
+def _prepare_domains(audio: np.ndarray, block_size: int, search_step: int):
+    """domainブロックと統計量をあらかじめ計算しておく"""
+    length = audio.shape[0]
+    starts = np.arange(0, length - 2 * block_size + 1, search_step)
+    # 各domainブロックをあらかじめ抽出
+    domains = np.stack(
+        [audio[s : s + 2 * block_size : 2] for s in starts],
+        axis=0,
+    )
+    means = np.mean(domains, axis=1)
+    centered = domains - means[:, None]
+    variances = np.sum(centered**2, axis=1)
+    return domains, centered, means, variances, starts
 
 
 def compress(audio: np.ndarray, block_size: int = 1024, search_step: int = 512):
@@ -32,23 +34,23 @@ def compress(audio: np.ndarray, block_size: int = 1024, search_step: int = 512):
     if pad:
         audio = np.pad(audio, (0, pad))
     length = audio.shape[0]
+    # domainブロックと統計量をまとめて準備
+    domains, centered, means, variances, starts = _prepare_domains(
+        audio, block_size, search_step
+    )
     transforms = []  # 各ブロックの変換パラメータを格納
     # 音源をrangeブロックに分割して処理
     for start in range(0, length, block_size):
         range_block = audio[start : start + block_size]
-        best_err = np.inf
-        best = None
-        # domainブロックを探索
-        for d_start in range(0, length - 2 * block_size + 1, search_step):
-            # domainブロックは2倍の長さを取り、1/2にサンプリング
-            domain_block = audio[d_start : d_start + 2 * block_size : 2]
-            s, o = _linear_regression(domain_block, range_block)
-            approx = s * domain_block + o
-            err = np.mean((range_block - approx) ** 2)
-            if err < best_err:
-                best_err = err
-                best = (d_start, s, o)
-        transforms.append(best)
+        r_mean = np.mean(range_block)
+        y = range_block - r_mean
+        # 全domainブロックに対する線形回帰をまとめて計算
+        s = centered @ y / variances
+        o = r_mean - s * means
+        approx = s[:, None] * domains + o[:, None]
+        errs = np.mean((range_block - approx) ** 2, axis=1)
+        idx = np.argmin(errs)
+        transforms.append((int(starts[idx]), float(s[idx]), float(o[idx])))
     return {
         "length": length,
         "orig_length": orig_length,
@@ -58,22 +60,35 @@ def compress(audio: np.ndarray, block_size: int = 1024, search_step: int = 512):
     }
 
 
+def _prepare_decompress(params):
+    """復元処理で用いるインデックス類を作成する"""
+    length = params["length"]
+    block_size = params["block_size"]
+    transforms = params["transforms"]
+    d_starts = np.array([t[0] for t in transforms], dtype=int)
+    scales = np.array([t[1] for t in transforms], dtype=float)
+    offsets = np.array([t[2] for t in transforms], dtype=float)
+    r_starts = np.arange(0, length, block_size)
+    domain_idx = d_starts[:, None] + np.arange(0, 2 * block_size, 2)
+    range_idx = r_starts[:, None] + np.arange(block_size)
+    return domain_idx, range_idx, scales, offsets
+
+
 def decompress(params, iterations: int = 8):
     """圧縮パラメータから音源を復元する"""
     length = params["length"]
     orig_length = params.get("orig_length", length)
     block_size = params["block_size"]
-    transforms = params["transforms"]
+    domain_idx, range_idx, scales, offsets = _prepare_decompress(params)
     # 初期値としてゼロ波形を用意
     audio = np.zeros(length, dtype=np.float64)
     for _ in range(iterations):
+        domains = audio[domain_idx]
+        approx = scales[:, None] * domains + offsets[:, None]
         new_audio = np.copy(audio)
-        for i, (d_start, s, o) in enumerate(transforms):
-            # domainブロックを現在の波形から取得
-            domain = audio[d_start : d_start + 2 * block_size : 2]
-            approx = s * domain + o
-            start = i * block_size
-            new_audio[start : start + block_size] = approx
+        # range_idx, approx はどちらも (block数, block_size) の形
+        for idx, block in zip(range_idx, approx):
+            new_audio[idx] = block
         audio = new_audio
     # パディングしていた場合は元の長さに切り詰める
     return audio[:orig_length]
