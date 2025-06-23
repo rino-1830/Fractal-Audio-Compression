@@ -4,7 +4,6 @@
 
 このスクリプトではブロック分割した音源の自己相似性を利用して、
 線形変換パラメータのみを保存する簡易的なフラクタル圧縮を行う。
-コメントは全て日本語で記述している。
 """
 
 import numpy as np
@@ -46,7 +45,14 @@ def compress(audio: np.ndarray, block_size: int = 1024, search_step: int = 512):
         r_mean = np.mean(range_block)
         y = range_block - r_mean
         # 全domainブロックに対する線形回帰をまとめて計算
-        s = centered @ y / variances
+        # 分散が0の場合は係数を0とし、警告を抑制する
+        with np.errstate(divide="ignore", invalid="ignore"):
+            s = np.divide(
+                centered @ y,
+                variances,
+                out=np.zeros_like(variances, dtype=float),
+                where=variances != 0,
+            )
         o = r_mean - s * means
         approx = s[:, None] * domains + o[:, None]
         errs = np.mean((range_block - approx) ** 2, axis=1)
@@ -105,8 +111,9 @@ def load_wav(path: str):
 
 def save_wav(path: str, rate: int, data: np.ndarray):
     """WAVファイルを書き出す"""
-    # 16bit PCMで保存する
-    clipped = np.clip(data, -32768, 32767).astype(np.int16)
+    # NaNやinfを除去して16bit PCMで保存する
+    safe = np.nan_to_num(data, nan=0.0, posinf=32767, neginf=-32768)
+    clipped = np.clip(safe, -32768, 32767).astype(np.int16)
     wavfile.write(path, rate, clipped)
 
 
