@@ -9,6 +9,7 @@
 
 import numpy as np
 from scipy.io import wavfile
+from tqdm import tqdm
 
 
 def _prepare_domains(audio: np.ndarray, block_size: int, search_step: int):
@@ -40,7 +41,7 @@ def compress(audio: np.ndarray, block_size: int = 1024, search_step: int = 512):
     )
     transforms = []  # 各ブロックの変換パラメータを格納
     # 音源をrangeブロックに分割して処理
-    for start in range(0, length, block_size):
+    for start in tqdm(range(0, length, block_size), desc="compress"):
         range_block = audio[start : start + block_size]
         r_mean = np.mean(range_block)
         y = range_block - r_mean
@@ -82,13 +83,12 @@ def decompress(params, iterations: int = 8):
     domain_idx, range_idx, scales, offsets = _prepare_decompress(params)
     # 初期値としてゼロ波形を用意
     audio = np.zeros(length, dtype=np.float64)
-    for _ in range(iterations):
+    for _ in tqdm(range(iterations), desc="decompress"):
         domains = audio[domain_idx]
         approx = scales[:, None] * domains + offsets[:, None]
         new_audio = np.copy(audio)
-        # range_idx, approx はどちらも (block数, block_size) の形
-        for idx, block in zip(range_idx, approx):
-            new_audio[idx] = block
+        # まとめて代入することで高速化
+        new_audio[range_idx] = approx
         audio = new_audio
     # パディングしていた場合は元の長さに切り詰める
     return audio[:orig_length]
