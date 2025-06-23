@@ -10,18 +10,35 @@
 ### 圧縮
 
 ```bash
-python fractal_audio_compression.py input.wav dummy.wav --mode compress --params params.npz
+python fractal_audio_compression.py input.wav dummy.wav \
+    --mode compress --params params.npz \
+    --block-size 1024 --search-step 512
 ```
 
+`--block-size` と `--search-step` を変更することで圧縮率を調整できます。
 入力長がブロックサイズの倍数でない場合は自動的にゼロパディングされます。
 
 ### 復元
 
 ```bash
-python fractal_audio_compression.py dummy.wav output.wav --mode decompress --params params.npz
+python fractal_audio_compression.py dummy.wav output.wav \
+    --mode decompress --params params.npz \
+    --iterations 8 --scale 2
 ```
 
+`--iterations` を増やすと復元精度が向上します。
+`--scale` でサンプルレートを何倍にして出力するかを指定できます。
+フラクタル圧縮の特性上、任意の倍率でのアップスケーリングが可能です。
 復元時には圧縮時のパディングが自動的に除去されます。
+
+## パラメータの影響
+
+| オプション | 値を大きくすると | 値を小さくすると |
+|-----------|----------------|----------------|
+| `--block-size` | ブロックが大きくなり、計算量は減るが細部の再現性が低下する | ブロックが細かくなり精度は上がるが処理時間は長くなる |
+| `--search-step` | domain探索候補が減り高速になるが、最適なブロックが見つかりにくくなる | 候補が増えて精度は上がるが計算量が増える |
+| `--iterations` | 繰り返し回数が増えるため復元品質が向上する | 回数を減らすと早く終わるが誤差が残りやすい |
+| `--scale` | サンプルレートが高くなり任意倍率での出力が可能 | 1に近づくほど元の音源に近いサンプルレートになる |
 
 `dummy.wav` は使用されませんが、引数として指定する必要があります。
 

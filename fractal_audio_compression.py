@@ -67,35 +67,36 @@ def compress(audio: np.ndarray, block_size: int = 1024, search_step: int = 512):
     }
 
 
-def _prepare_decompress(params):
+def _prepare_decompress(params, scale: int = 1):
     """復元処理で用いるインデックス類を作成する"""
-    length = params["length"]
     block_size = params["block_size"]
     transforms = params["transforms"]
-    d_starts = np.array([t[0] for t in transforms], dtype=int)
+    d_starts = np.array([t[0] for t in transforms], dtype=int) * scale
     scales = np.array([t[1] for t in transforms], dtype=float)
     offsets = np.array([t[2] for t in transforms], dtype=float)
-    r_starts = np.arange(0, length, block_size)
-    domain_idx = d_starts[:, None] + np.arange(0, 2 * block_size, 2)
-    range_idx = r_starts[:, None] + np.arange(block_size)
+    r_starts = np.arange(0, params["length"], block_size) * scale
+    # 拡大倍率に合わせてdomainブロックの間引き間隔も拡大
+    domain_idx = d_starts[:, None] + np.arange(0, 2 * block_size * scale, 2 * scale)
+    range_idx = r_starts[:, None] + np.arange(block_size * scale)
     return domain_idx, range_idx, scales, offsets
 
 
-def decompress(params, iterations: int = 8):
+def decompress(params, iterations: int = 8, scale: int = 1):
     """圧縮パラメータから音源を復元する"""
-    length = params["length"]
-    orig_length = params.get("orig_length", length)
-    block_size = params["block_size"]
-    domain_idx, range_idx, scales, offsets = _prepare_decompress(params)
+    length = params["length"] * scale
+    orig_length = params.get("orig_length", params["length"]) * scale
+    block_size = params["block_size"] * scale
+    domain_idx, range_idx, scales, offsets = _prepare_decompress(params, scale)
     # 初期値としてゼロ波形を用意
     audio = np.zeros(length, dtype=np.float64)
+    new_audio = np.zeros_like(audio)
     for _ in tqdm(range(iterations), desc="decompress"):
         domains = audio[domain_idx]
         approx = scales[:, None] * domains + offsets[:, None]
-        new_audio = np.copy(audio)
+        new_audio[:] = audio
         # まとめて代入することで高速化
         new_audio[range_idx] = approx
-        audio = new_audio
+        audio, new_audio = new_audio, audio
     # パディングしていた場合は元の長さに切り詰める
     return audio[:orig_length]
 
@@ -129,13 +130,24 @@ if __name__ == "__main__":
     parser.add_argument(
         "--params", help="パラメータ保存/読込ファイル", default="params.npz"
     )
+    # 圧縮・復元の調整パラメータ
+    parser.add_argument("--block-size", type=int, default=1024, help="ブロックサイズ")
+    parser.add_argument(
+        "--search-step", type=int, default=512, help="domain探索のステップ"
+    )
+    parser.add_argument("--iterations", type=int, default=8, help="復元時の反復回数")
+    parser.add_argument("--scale", type=int, default=1, help="アップスケール倍率")
     args = parser.parse_args()
 
     if args.mode == "compress":
         # 入力音源を読み込み各チャンネルを圧縮
         rate, data = load_wav(args.input)
-        left_params = compress(data[:, 0])
-        right_params = compress(data[:, 1])
+        left_params = compress(
+            data[:, 0], block_size=args.block_size, search_step=args.search_step
+        )
+        right_params = compress(
+            data[:, 1], block_size=args.block_size, search_step=args.search_step
+        )
         # dictをそのまま渡すと型検査で怒られるため、object配列に変換して保存
         np.savez(
             args.params,
@@ -149,7 +161,7 @@ if __name__ == "__main__":
         left_params = npz["left"].item()
         right_params = npz["right"].item()
         rate = int(npz["rate"])
-        left = decompress(left_params)
-        right = decompress(right_params)
+        left = decompress(left_params, iterations=args.iterations, scale=args.scale)
+        right = decompress(right_params, iterations=args.iterations, scale=args.scale)
         stereo = np.stack([left, right], axis=-1)
-        save_wav(args.output, rate, stereo)
+        save_wav(args.output, rate * args.scale, stereo)
