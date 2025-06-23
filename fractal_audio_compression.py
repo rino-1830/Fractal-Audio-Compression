@@ -39,8 +39,10 @@ def compress(audio: np.ndarray, block_size: int = 1024, search_step: int = 512):
         audio, block_size, search_step
     )
     transforms = []  # 各ブロックの変換パラメータを格納
+    # 残り予測時間を表示するため tqdm オブジェクトを変数として保持
+    pbar = tqdm(range(0, length, block_size), desc="compress")
     # 音源をrangeブロックに分割して処理
-    for start in tqdm(range(0, length, block_size), desc="compress"):
+    for start in pbar:
         range_block = audio[start : start + block_size]
         r_mean = np.mean(range_block)
         y = range_block - r_mean
@@ -58,6 +60,11 @@ def compress(audio: np.ndarray, block_size: int = 1024, search_step: int = 512):
         errs = np.mean((range_block - approx) ** 2, axis=1)
         idx = np.argmin(errs)
         transforms.append((int(starts[idx]), float(s[idx]), float(o[idx])))
+        # tqdm が計算した残り時間をフォーマットして表示
+        remaining = pbar.format_dict.get("remaining")
+        if remaining is not None:
+            eta = pbar.format_interval(remaining)
+            pbar.set_postfix_str(f"残り予測時間: {eta}")
     return {
         "length": length,
         "orig_length": orig_length,
@@ -89,13 +96,20 @@ def decompress(params, iterations: int = 8, scale: int = 1):
     # 初期値としてゼロ波形を用意
     audio = np.zeros(length, dtype=np.float64)
     new_audio = np.zeros_like(audio)
-    for _ in tqdm(range(iterations), desc="decompress"):
+    # 進捗から残り時間を得るため tqdm オブジェクトを保持
+    pbar = tqdm(range(iterations), desc="decompress")
+    for _ in pbar:
         domains = audio[domain_idx]
         approx = scales[:, None] * domains + offsets[:, None]
         new_audio[:] = audio
         # まとめて代入することで高速化
         new_audio[range_idx] = approx
         audio, new_audio = new_audio, audio
+        # tqdm の remaining をフォーマットして残り予測時間を表示
+        remaining = pbar.format_dict.get("remaining")
+        if remaining is not None:
+            eta = pbar.format_interval(remaining)
+            pbar.set_postfix_str(f"残り予測時間: {eta}")
     # パディングしていた場合は元の長さに切り詰める
     return audio[:orig_length]
 
