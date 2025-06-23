@@ -75,8 +75,8 @@ def _prepare_decompress(params, scale: int = 1):
     scales = np.array([t[1] for t in transforms], dtype=float)
     offsets = np.array([t[2] for t in transforms], dtype=float)
     r_starts = np.arange(0, params["length"], block_size) * scale
-    # 拡大倍率に合わせてdomainブロックの間引き間隔も拡大
-    domain_idx = d_starts[:, None] + np.arange(0, 2 * block_size * scale, 2 * scale)
+    # domainブロックの長さを倍率に合わせて拡大し、2サンプルおきに参照
+    domain_idx = d_starts[:, None] + np.arange(0, 2 * block_size * scale, 2)
     range_idx = r_starts[:, None] + np.arange(block_size * scale)
     return domain_idx, range_idx, scales, offsets
 
@@ -85,7 +85,6 @@ def decompress(params, iterations: int = 8, scale: int = 1):
     """圧縮パラメータから音源を復元する"""
     length = params["length"] * scale
     orig_length = params.get("orig_length", params["length"]) * scale
-    block_size = params["block_size"] * scale
     domain_idx, range_idx, scales, offsets = _prepare_decompress(params, scale)
     # 初期値としてゼロ波形を用意
     audio = np.zeros(length, dtype=np.float64)
