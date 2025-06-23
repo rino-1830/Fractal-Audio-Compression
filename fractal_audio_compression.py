@@ -1,0 +1,127 @@
+# -*- coding: utf-8 -*-
+"""
+ステレオ音源の時間波形に対する簡易フラクタル圧縮の実装。
+
+このスクリプトではブロック分割した音源の自己相似性を利用して、
+線形変換パラメータのみを保存する簡易的なフラクタル圧縮を行う。
+コメントは全て日本語で記述している。
+"""
+
+import numpy as np
+from scipy.io import wavfile
+
+
+def _linear_regression(x: np.ndarray, y: np.ndarray):
+    """xからyへの線形変換係数(s, o)を求める"""
+    # 単純な最小二乗法による係数推定
+    x_mean = np.mean(x)
+    y_mean = np.mean(y)
+    var = np.sum((x - x_mean) ** 2)
+    if var == 0:
+        return 0.0, y_mean
+    s = np.sum((x - x_mean) * (y - y_mean)) / var
+    o = y_mean - s * x_mean
+    return s, o
+
+
+def compress(audio: np.ndarray, block_size: int = 1024, search_step: int = 512):
+    """音源をフラクタル圧縮する"""
+    orig_length = audio.shape[0]
+    # ブロック単位にそろえるためゼロ埋めを行う
+    pad = (-orig_length) % block_size
+    if pad:
+        audio = np.pad(audio, (0, pad))
+    length = audio.shape[0]
+    transforms = []  # 各ブロックの変換パラメータを格納
+    # 音源をrangeブロックに分割して処理
+    for start in range(0, length, block_size):
+        range_block = audio[start : start + block_size]
+        best_err = np.inf
+        best = None
+        # domainブロックを探索
+        for d_start in range(0, length - 2 * block_size + 1, search_step):
+            # domainブロックは2倍の長さを取り、1/2にサンプリング
+            domain_block = audio[d_start : d_start + 2 * block_size : 2]
+            s, o = _linear_regression(domain_block, range_block)
+            approx = s * domain_block + o
+            err = np.mean((range_block - approx) ** 2)
+            if err < best_err:
+                best_err = err
+                best = (d_start, s, o)
+        transforms.append(best)
+    return {
+        "length": length,
+        "orig_length": orig_length,
+        "block_size": block_size,
+        "search_step": search_step,
+        "transforms": transforms,
+    }
+
+
+def decompress(params, iterations: int = 8):
+    """圧縮パラメータから音源を復元する"""
+    length = params["length"]
+    orig_length = params.get("orig_length", length)
+    block_size = params["block_size"]
+    transforms = params["transforms"]
+    # 初期値としてゼロ波形を用意
+    audio = np.zeros(length, dtype=np.float64)
+    for _ in range(iterations):
+        new_audio = np.copy(audio)
+        for i, (d_start, s, o) in enumerate(transforms):
+            # domainブロックを現在の波形から取得
+            domain = audio[d_start : d_start + 2 * block_size : 2]
+            approx = s * domain + o
+            start = i * block_size
+            new_audio[start : start + block_size] = approx
+        audio = new_audio
+    # パディングしていた場合は元の長さに切り詰める
+    return audio[:orig_length]
+
+
+def load_wav(path: str):
+    """WAVファイルを読み込む"""
+    # 単一チャンネルの場合でもステレオに変換
+    rate, data = wavfile.read(path)
+    if data.ndim == 1:
+        data = np.stack([data, data], axis=-1)
+    return rate, data.astype(np.float64)
+
+
+def save_wav(path: str, rate: int, data: np.ndarray):
+    """WAVファイルを書き出す"""
+    # 16bit PCMで保存する
+    clipped = np.clip(data, -32768, 32767).astype(np.int16)
+    wavfile.write(path, rate, clipped)
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="ステレオ音源フラクタル圧縮デモ")
+    parser.add_argument("input", help="入力WAVファイル")
+    parser.add_argument("output", help="出力WAVファイル")
+    parser.add_argument(
+        "--mode", choices=["compress", "decompress"], default="compress"
+    )
+    parser.add_argument(
+        "--params", help="パラメータ保存/読込ファイル", default="params.npz"
+    )
+    args = parser.parse_args()
+
+    if args.mode == "compress":
+        # 入力音源を読み込み各チャンネルを圧縮
+        rate, data = load_wav(args.input)
+        left_params = compress(data[:, 0])
+        right_params = compress(data[:, 1])
+        np.savez(args.params, left=left_params, right=right_params, rate=rate)
+    else:
+        # 保存しておいたパラメータから音源を復元
+        npz = np.load(args.params, allow_pickle=True)
+        left_params = npz["left"].item()
+        right_params = npz["right"].item()
+        rate = int(npz["rate"])
+        left = decompress(left_params)
+        right = decompress(right_params)
+        stereo = np.stack([left, right], axis=-1)
+        save_wav(args.output, rate, stereo)
