@@ -73,12 +73,10 @@ def compress(audio: cp.ndarray, block_size: int = 1024, search_step: int = 512):
         # 分散が0の場合は係数を0とし、警告を抑制する
         # CuPy に errstate がない環境でも動作するよう独自実装を利用
         with errstate(divide="ignore", invalid="ignore"):
-            s = cp.divide(
-                centered @ y,
-                variances,
-                out=cp.zeros_like(variances, dtype=cp.float32),
-                where=variances != 0,
-            )
+            # 分母が0の場合は1で割り、後で0に置き換える
+            denom = cp.where(variances != 0, variances, 1)
+            tmp = (centered @ y) / denom
+            s = cp.where(variances != 0, tmp, 0.0)
         o = r_mean - s * means
         approx = s[:, None] * domains + o[:, None]
         errs = cp.mean((range_block - approx) ** 2, axis=1, dtype=cp.float32)
@@ -154,6 +152,9 @@ def load_wav(path: str):
     rate, data = wavfile.read(path)
     if data.ndim == 1:
         data = np.stack([data, data], axis=-1)
+    # 浮動小数点形式の場合は -1.0..1.0 を 16bit スケールへ変換
+    if np.issubdtype(data.dtype, np.floating):
+        data = np.clip(data, -1.0, 1.0) * 32767.0
     return rate, cp.asarray(data.astype(np.float32))
 
 

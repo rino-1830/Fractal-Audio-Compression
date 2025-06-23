@@ -120,6 +120,9 @@ def load_wav(path: str):
     rate, data = wavfile.read(path)
     if data.ndim == 1:
         data = np.stack([data, data], axis=-1)
+    # 浮動小数点形式の場合は -1.0..1.0 を 16bit スケールへ変換
+    if np.issubdtype(data.dtype, np.floating):
+        data = np.clip(data, -1.0, 1.0) * 32767.0
     return rate, data.astype(np.float64)
 
 
