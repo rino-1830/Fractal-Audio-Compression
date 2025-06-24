@@ -1,4 +1,4 @@
 numpy
 scipy
 tqdm
-cupy
+cupy-cuda12x
