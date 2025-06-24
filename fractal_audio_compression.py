@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ステレオ音源の時間波形に対する簡易フラクタル圧縮の実装。
 
@@ -15,11 +14,9 @@ def _prepare_domains(audio: np.ndarray, block_size: int, search_step: int):
     """domainブロックと統計量をあらかじめ計算しておく"""
     length = audio.shape[0]
     starts = np.arange(0, length - 2 * block_size + 1, search_step)
-    # 各domainブロックをあらかじめ抽出
-    domains = np.stack(
-        [audio[s : s + 2 * block_size : 2] for s in starts],
-        axis=0,
-    )
+    # forループを使わずインデックス配列で一括取得
+    idx = starts[:, None] + np.arange(0, 2 * block_size, 2)
+    domains = audio[idx]
     means = np.mean(domains, axis=1)
     centered = domains - means[:, None]
     variances = np.sum(centered**2, axis=1)
@@ -104,6 +101,7 @@ def decompress(params, iterations: int = 8, scale: int = 1):
         new_audio[:] = audio
         # まとめて代入することで高速化
         new_audio[range_idx] = approx
+        # 新旧の配列を入れ替えて余計な再確保を防ぐ
         audio, new_audio = new_audio, audio
         # tqdm の remaining をフォーマットして残り予測時間を表示
         remaining = pbar.format_dict.get("remaining")

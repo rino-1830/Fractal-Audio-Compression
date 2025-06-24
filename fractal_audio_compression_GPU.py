@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ステレオ音源の時間波形に対する簡易フラクタル圧縮の実装。
 
@@ -136,6 +135,7 @@ def decompress(params, iterations: int = 8, scale: int = 1):
         new_audio[:] = audio
         # まとめて代入することで高速化
         new_audio[range_idx] = approx
+        # 新旧の配列を入れ替えて余計な再確保を防ぐ
         audio, new_audio = new_audio, audio
         # tqdm の remaining をフォーマットして残り予測時間を表示
         remaining = pbar.format_dict.get("remaining")

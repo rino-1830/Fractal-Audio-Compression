@@ -48,3 +48,6 @@ python fractal_audio_compression.py input.wav output.wav \
 
 ## GPU 版
 `fractal_audio_compression_GPU.py` は CuPy を利用した GPU 対応版です。計算は単精度 (`float32`) で行われるためメモリを節約できます。使用するには CUDA 対応 GPU と CuPy のインストールが必要です。
+
+## コントリビューション
+このプロジェクトの一部コードとドキュメントは OpenAI の Codex を用いて生成および修正されました。
