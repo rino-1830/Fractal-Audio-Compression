@@ -3,6 +3,7 @@
 
 ## 準備
 必要なパッケージは次のコマンドでインストールできます。
+作成には `Python 3.13.5`、`CUDA Toolkit 12.9.1` を使用しています。
 ```bash
 pip install -r requirements.txt
 ```
