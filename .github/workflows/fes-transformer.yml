@@ -7,6 +7,10 @@ on:
     paths:
       - "experiments/fes-transformer/**"
       - ".github/workflows/fes-transformer.yml"
+  pull_request:
+    paths:
+      - "experiments/fes-transformer/**"
+      - ".github/workflows/fes-transformer.yml"
   workflow_dispatch:
 
 permissions:
