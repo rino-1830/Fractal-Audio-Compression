@@ -6,74 +6,120 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from datasets import load_dataset
 from scipy.linalg import eigh
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 MODEL_ID = os.environ.get("MODEL_ID", "EleutherAI/pythia-70m-deduped")
-SEED = 7
+SEEDS = (7, 19)
+LAYERS = (0, 3)
 K = 4
-LOW_RANKS = (1, 2, 4)
+SELECT_N = 4
+LOW_RANK = 2
+CAL_N = 24
+HOLD_N = 24
+MODES = ("plain_ternary", "hadamard_ternary")
 
-TEXTS = [
-    "The capital of France is Paris and the capital of Japan is Tokyo.",
-    "Water freezes at zero degrees Celsius under standard atmospheric pressure.",
-    "A triangle has three sides and the sum of its interior angles is 180 degrees in Euclidean geometry.",
-    "The Earth orbits the Sun once each year.",
-    "Photosynthesis converts light energy into chemical energy in plants.",
-    "If Alice has three apples and buys two more, she has five apples.",
-    "Ten divided by two equals five.",
-    "The opposite of north is south.",
-    "A kilogram contains one thousand grams.",
-    "The Pacific Ocean is larger than the Atlantic Ocean.",
-    "A prime number has exactly two positive divisors.",
-    "The Moon reflects sunlight and does not produce visible light of its own.",
-    "In binary notation, the decimal number two is written as 10.",
-    "The derivative of x squared is two x.",
-    "A square has four equal sides.",
-    "Sound travels through air as a pressure wave.",
-    "An hour contains sixty minutes.",
-    "The chemical symbol for oxygen is O.",
-    "Multiplying any finite number by zero gives zero.",
-    "The human heart pumps blood through the circulatory system.",
-]
 
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+
+def load_corpus(n=96):
+    ds = load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="test")
+    texts = []
+    for row in ds:
+        t = " ".join(row["text"].split())
+        if 80 <= len(t) <= 420:
+            texts.append(t)
+        if len(texts) >= n:
+            break
+    if len(texts) < n:
+        raise RuntimeError(f"Only found {len(texts)} suitable corpus lines")
+    return texts
+
+
 def encode(tok, text):
-    return tok(text, return_tensors="pt", truncation=True, max_length=64)
+    return tok(text, return_tensors="pt", truncation=True, max_length=80)
+
 
 @torch.no_grad()
 def nll(model, tok, text):
     x = encode(tok, text)
-    out = model(**x, labels=x["input_ids"])
-    return float(out.loss)
+    return float(model(**x, labels=x["input_ids"]).loss)
+
 
 def eval_texts(model, tok, texts):
     return np.array([nll(model, tok, t) for t in texts], dtype=np.float64)
 
-def rowwise_ternary(w):
+
+def ternary_groupwise(w, group=128):
     x = w.detach().float()
-    mean_abs = x.abs().mean(dim=1, keepdim=True)
+    n = x.shape[-1]
+    if n % group:
+        raise ValueError(f"last dim {n} not divisible by group {group}")
+    y = x.reshape(*x.shape[:-1], n // group, group)
+    mean_abs = y.abs().mean(dim=-1, keepdim=True)
     threshold = 0.7 * mean_abs
-    mask = x.abs() >= threshold
-    denom = mask.sum(dim=1, keepdim=True).clamp_min(1)
-    scale = (x.abs() * mask).sum(dim=1, keepdim=True) / denom
-    return (scale * x.sign() * mask).to(dtype=w.dtype)
+    mask = y.abs() >= threshold
+    denom = mask.sum(dim=-1, keepdim=True).clamp_min(1)
+    scale = (y.abs() * mask).sum(dim=-1, keepdim=True) / denom
+    q = scale * y.sign() * mask
+    return q.reshape_as(x).to(dtype=w.dtype)
+
+
+def fwht_last(x):
+    n = x.shape[-1]
+    if n & (n - 1):
+        raise ValueError("Hadamard dimension must be a power of two")
+    y = x.reshape(-1, n).clone()
+    h = 1
+    while h < n:
+        v = y.view(-1, n // (2 * h), 2, h)
+        a = v[:, :, 0, :].clone()
+        b = v[:, :, 1, :].clone()
+        v[:, :, 0, :] = a + b
+        v[:, :, 1, :] = a - b
+        y = v.view(-1, n)
+        h *= 2
+    return (y / math.sqrt(n)).reshape_as(x)
+
+
+def quantize_effective(w, mode, sign_seed):
+    x = w.detach().float()
+    if mode == "plain_ternary":
+        return ternary_groupwise(x)
+    if mode != "hadamard_ternary":
+        raise ValueError(mode)
+
+    g = torch.Generator(device="cpu")
+    g.manual_seed(sign_seed)
+    signs = torch.randint(0, 2, (x.shape[-1],), generator=g, dtype=torch.int64)
+    signs = signs.float().mul_(2).sub_(1)
+    # R = H D; stored W' = W R^T = W D H.  Quantize W', then map
+    # back to the original basis for ordinary PyTorch evaluation:
+    # W_eff = Q(W D H) H D.
+    rotated = fwht_last(x * signs)
+    q_rot = ternary_groupwise(rotated)
+    effective = fwht_last(q_rot) * signs
+    return effective.to(dtype=w.dtype)
+
 
 def sample_grad(model, tok, target, text):
     model.zero_grad(set_to_none=True)
     x = encode(tok, text)
-    out = model(**x, labels=x["input_ids"])
-    g = torch.autograd.grad(out.loss, target, retain_graph=False, create_graph=False)[0]
+    loss = model(**x, labels=x["input_ids"]).loss
+    g = torch.autograd.grad(loss, target, retain_graph=False, create_graph=False)[0]
     g = g.detach().float().reshape(-1)
     return g / g.norm().clamp_min(1e-12)
+
 
 def orthonormalize(cols):
     q, _ = torch.linalg.qr(cols, mode="reduced")
     return q
+
 
 def fisher_basis(G, k):
     Kmat = G @ G.T
@@ -84,8 +130,8 @@ def fisher_basis(G, k):
     U = G.T @ (vecs / torch.sqrt(vals).unsqueeze(0))
     return orthonormalize(U)
 
+
 def failure_basis(G, nf, k):
-    # G rows are [failure gradients, stable gradients].
     n = G.shape[0]
     Kmat = (G @ G.T).double().cpu().numpy()
     fi = np.arange(nf)
@@ -93,78 +139,82 @@ def failure_basis(G, nf, k):
     A = Kmat[:, fi] @ Kmat[fi, :]
     B = Kmat[:, si] @ Kmat[si, :]
     reg = max(np.trace(Kmat) / max(n, 1), 1e-8) * 1e-2
-    B = B + reg * np.eye(n)
-    vals, vecs = eigh(A, B, check_finite=False)
+    vals, vecs = eigh(A, B + reg * np.eye(n), check_finite=False)
     order = np.argsort(vals)[::-1][:k]
     coeff = torch.from_numpy(vecs[:, order]).to(dtype=G.dtype)
-    U = G.T @ coeff
-    return orthonormalize(U), vals[order].tolist()
+    return orthonormalize(G.T @ coeff), vals[order].tolist()
 
-def random_basis(p, k):
+
+def random_basis(p, k, seed):
     gen = torch.Generator(device="cpu")
-    gen.manual_seed(SEED + 100)
+    gen.manual_seed(seed)
     return orthonormalize(torch.randn(p, k, generator=gen))
 
-def directional_correction(residual_flat, U):
-    return U @ (U.T @ residual_flat)
 
 def low_rank_approx(mat, rank):
-    # Randomized low-rank SVD; rank <= 4 here.
     q = min(max(rank + 2, rank), min(mat.shape))
     U, S, V = torch.svd_lowrank(mat, q=q, niter=2)
     return (U[:, :rank] * S[:rank]) @ V[:, :rank].T
 
-def apply_and_eval(target, candidate, model, tok):
+
+def directional_correction(residual_flat, U):
+    return U @ (U.T @ residual_flat)
+
+
+def apply_and_eval(target, candidate, model, tok, texts):
     with torch.no_grad():
         target.copy_(candidate.to(dtype=target.dtype))
-    vals = eval_texts(model, tok, TEXTS)
-    return vals
+    return eval_texts(model, tok, texts)
 
-def summarize_delta(fp, vals, fail_idx, stable_idx):
+
+def metrics(fp, vals, baseline_delta):
     d = vals - fp
+    top = np.argsort(baseline_delta)[-SELECT_N:]
     return {
         "mean_delta_nll": float(d.mean()),
         "median_delta_nll": float(np.median(d)),
-        "failure_mean_delta_nll": float(d[fail_idx].mean()),
-        "stable_mean_delta_nll": float(d[stable_idx].mean()),
+        "baseline_failure_subset_delta_nll": float(d[top].mean()),
         "max_delta_nll": float(d.max()),
     }
 
-def main():
-    set_seed(SEED)
-    torch.set_num_threads(2)
-    outdir = Path("results")
-    outdir.mkdir(exist_ok=True)
 
-    tok = AutoTokenizer.from_pretrained(MODEL_ID)
-    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=torch.float32)
-    model.eval()
+def run_one(model, tok, corpus, layer_idx, mode, seed):
+    set_seed(seed)
+    perm = np.random.permutation(len(corpus))
+    cal_texts = [corpus[int(i)] for i in perm[:CAL_N]]
+    hold_texts = [corpus[int(i)] for i in perm[CAL_N:CAL_N + HOLD_N]]
 
-    target = model.gpt_neox.layers[0].mlp.dense_h_to_4h.weight
+    target = model.gpt_neox.layers[layer_idx].mlp.dense_h_to_4h.weight
     original = target.detach().clone()
-    quantized = rowwise_ternary(original)
+    sign_seed = 1000 + 97 * layer_idx + seed
+    quantized = quantize_effective(original, mode, sign_seed)
 
-    fp = eval_texts(model, tok, TEXTS)
+    with torch.no_grad():
+        target.copy_(original)
+    fp_cal = eval_texts(model, tok, cal_texts)
+    fp_hold = eval_texts(model, tok, hold_texts)
+
     with torch.no_grad():
         target.copy_(quantized)
-    qvals = eval_texts(model, tok, TEXTS)
-    qdelta = qvals - fp
+    q_cal = eval_texts(model, tok, cal_texts)
+    q_hold = eval_texts(model, tok, hold_texts)
+    cal_delta = q_cal - fp_cal
+    hold_delta = q_hold - fp_hold
 
-    fail_idx = np.argsort(qdelta)[-4:][::-1]
-    stable_idx = np.argsort(qdelta)[:4]
+    fail_idx = np.argsort(cal_delta)[-SELECT_N:][::-1]
+    stable_idx = np.argsort(cal_delta)[:SELECT_N]
     selected = list(fail_idx) + list(stable_idx)
 
     with torch.no_grad():
         target.copy_(original)
+    G = torch.stack(
+        [sample_grad(model, tok, target, cal_texts[int(i)]) for i in selected],
+        dim=0,
+    )
 
-    grads = []
-    for idx in selected:
-        grads.append(sample_grad(model, tok, target, TEXTS[int(idx)]))
-    G = torch.stack(grads, dim=0)
-
-    ufail, gen_eigs = failure_basis(G, nf=len(fail_idx), k=K)
+    ufail, eigs = failure_basis(G, nf=SELECT_N, k=K)
     ufish = fisher_basis(G, K)
-    urand = random_basis(G.shape[1], K)
+    urand = random_basis(G.shape[1], K, seed + 5555)
 
     residual = (quantized.float() - original.float()).reshape(-1)
     methods = {
@@ -173,78 +223,142 @@ def main():
         "random": urand,
     }
 
-    results = {
-        "model": MODEL_ID,
-        "target_shape": list(original.shape),
-        "num_target_weights": int(original.numel()),
-        "seed": SEED,
-        "k": K,
-        "failure_indices": [int(x) for x in fail_idx],
-        "stable_indices": [int(x) for x in stable_idx],
-        "failure_generalized_eigenvalues": gen_eigs,
-        "baseline": {
-            "fp_mean_nll": float(fp.mean()),
-            "ternary": summarize_delta(fp, qvals, fail_idx, stable_idx),
-        },
+    m, n = original.shape
+    result = {
+        "seed": seed,
+        "layer": layer_idx,
+        "mode": mode,
+        "shape": list(original.shape),
+        "baseline": metrics(fp_hold, q_hold, hold_delta),
+        "calibration_failure_mean_delta_nll": float(cal_delta[fail_idx].mean()),
+        "holdout_failure_mean_delta_nll": float(np.sort(hold_delta)[-SELECT_N:].mean()),
+        "failure_generalized_eigenvalues": eigs,
         "methods": {},
     }
 
-    m, n = original.shape
     for name, U in methods.items():
         corr_flat = directional_correction(residual, U)
         corr = corr_flat.reshape_as(original)
 
-        exact_candidate = quantized.float() - corr
-        exact_vals = apply_and_eval(target, exact_candidate, model, tok)
-        entry = {
-            "exact_directional_correction": summarize_delta(fp, exact_vals, fail_idx, stable_idx),
-            "correction_energy_fraction": float(corr_flat.pow(2).sum() / residual.pow(2).sum().clamp_min(1e-12)),
-            "low_rank": {},
-        }
+        exact = quantized.float() - corr
+        exact_vals = apply_and_eval(target, exact, model, tok, hold_texts)
 
-        for rank in LOW_RANKS:
-            lr_corr = low_rank_approx(corr, rank)
-            candidate = quantized.float() - lr_corr
-            vals = apply_and_eval(target, candidate, model, tok)
-            overhead = 16.0 * rank * (m + n) / (m * n)
-            entry["low_rank"][str(rank)] = {
-                **summarize_delta(fp, vals, fail_idx, stable_idx),
-                "fp16_factor_overhead_bits_per_target_weight": float(overhead),
-                "ternary_plus_overhead_bpw_nominal": float(math.log2(3.0) + overhead),
-            }
-        results["methods"][name] = entry
+        lr_corr = low_rank_approx(corr, LOW_RANK)
+        lr_candidate = quantized.float() - lr_corr
+        lr_vals = apply_and_eval(target, lr_candidate, model, tok, hold_texts)
+
+        overhead = 16.0 * LOW_RANK * (m + n) / (m * n)
+        result["methods"][name] = {
+            "correction_energy_fraction": float(
+                corr_flat.pow(2).sum() / residual.pow(2).sum().clamp_min(1e-12)
+            ),
+            "exact": metrics(fp_hold, exact_vals, hold_delta),
+            "rank2": {
+                **metrics(fp_hold, lr_vals, hold_delta),
+                "fp16_factor_overhead_bpw": float(overhead),
+                "nominal_ternary_plus_overhead_bpw": float(math.log2(3.0) + overhead),
+            },
+        }
 
     with torch.no_grad():
         target.copy_(original)
+    return result
 
-    (outdir / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
 
-    base = results["baseline"]["ternary"]
+def aggregate(runs):
+    rows = []
+    for mode in MODES:
+        for layer in LAYERS:
+            subset = [r for r in runs if r["mode"] == mode and r["layer"] == layer]
+            base = np.array([r["baseline"]["baseline_failure_subset_delta_nll"] for r in subset])
+            for method in ("failure_conditioned", "fisher_all", "random"):
+                exact = np.array([
+                    r["methods"][method]["exact"]["baseline_failure_subset_delta_nll"]
+                    for r in subset
+                ])
+                rank2 = np.array([
+                    r["methods"][method]["rank2"]["baseline_failure_subset_delta_nll"]
+                    for r in subset
+                ])
+                rows.append({
+                    "mode": mode,
+                    "layer": layer,
+                    "method": method,
+                    "baseline_failure_delta_mean": float(base.mean()),
+                    "exact_failure_delta_mean": float(exact.mean()),
+                    "rank2_failure_delta_mean": float(rank2.mean()),
+                    "rank2_recovery_fraction": float(
+                        1.0 - rank2.mean() / max(base.mean(), 1e-12)
+                    ),
+                })
+    return rows
+
+
+def main():
+    torch.set_num_threads(2)
+    outdir = Path("results")
+    outdir.mkdir(exist_ok=True)
+
+    # self-test the orthonormal Hadamard transform
+    probe = torch.randn(3, 512)
+    err = (fwht_last(fwht_last(probe)) - probe).abs().max().item()
+    if err > 2e-5:
+        raise RuntimeError(f"FWHT self-test failed: {err}")
+
+    corpus = load_corpus()
+    tok = AutoTokenizer.from_pretrained(MODEL_ID)
+    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, dtype=torch.float32)
+    model.eval()
+
+    runs = []
+    for mode in MODES:
+        for layer in LAYERS:
+            for seed in SEEDS:
+                print(f"RUN mode={mode} layer={layer} seed={seed}", flush=True)
+                runs.append(run_one(model, tok, corpus, layer, mode, seed))
+
+    agg = aggregate(runs)
+    payload = {
+        "model": MODEL_ID,
+        "corpus": "Salesforce/wikitext wikitext-2-raw-v1 test",
+        "calibration_n": CAL_N,
+        "holdout_n": HOLD_N,
+        "seeds": list(SEEDS),
+        "layers": list(LAYERS),
+        "k": K,
+        "low_rank": LOW_RANK,
+        "runs": runs,
+        "aggregate": agg,
+    }
+    (outdir / "results.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
     lines = [
-        "# Functional compression probe",
+        "# Functional compression probe v2: held-out generalization",
         "",
         f"Model: \`{MODEL_ID}\`",
-        f"Target: first MLP expansion matrix, shape {tuple(original.shape)}, {original.numel():,} weights",
+        f"Calibration/holdout per run: {CAL_N}/{HOLD_N} Wikitext lines; seeds {SEEDS}.",
         "",
-        "The probe ternary-quantizes one matrix, identifies the four prompts with the largest NLL degradation and four with the smallest degradation, then compares equal-dimensional protected subspaces.",
+        "The protected subspace is learned only from calibration examples. The reported failure subset is selected from the baseline quantization degradation on the unseen holdout set, before any correction is evaluated.",
         "",
-        "| method | correction | mean ΔNLL | failure-set ΔNLL | overhead bpw (target matrix) |",
-        "|---|---:|---:|---:|---:|",
-        f"| ternary baseline | none | {base['mean_delta_nll']:.6f} | {base['failure_mean_delta_nll']:.6f} | 0 |",
+        "| quantizer | layer | method | baseline failure ΔNLL | exact protected ΔNLL | rank-2 ΔNLL | rank-2 recovery |",
+        "|---|---:|---|---:|---:|---:|---:|",
     ]
-    for name, entry in results["methods"].items():
-        ex = entry["exact_directional_correction"]
-        lines.append(f"| {name} | exact k={K} directional | {ex['mean_delta_nll']:.6f} | {ex['failure_mean_delta_nll']:.6f} | not storage-efficient |")
-        for rank in LOW_RANKS:
-            r = entry["low_rank"][str(rank)]
-            lines.append(f"| {name} | rank-{rank} factor | {r['mean_delta_nll']:.6f} | {r['failure_mean_delta_nll']:.6f} | +{r['fp16_factor_overhead_bits_per_target_weight']:.4f} |")
-
+    for row in agg:
+        lines.append(
+            f"| {row['mode']} | {row['layer']} | {row['method']} | "
+            f"{row['baseline_failure_delta_mean']:.6f} | "
+            f"{row['exact_failure_delta_mean']:.6f} | "
+            f"{row['rank2_failure_delta_mean']:.6f} | "
+            f"{100*row['rank2_recovery_fraction']:.1f}% |"
+        )
     lines += [
         "",
-        "Interpretation rule: the hypothesis gets preliminary support only if failure-conditioned correction consistently reduces failure-set degradation more than both Fisher-all and random at the same correction rank. A single small-model run is not sufficient to establish generality.",
+        "Interpretation: support requires failure-conditioned correction to beat Fisher-all and random on unseen holdout data across both ordinary ternary and Hadamard-rotated ternary settings. Negative recovery means the correction made holdout degradation worse.",
     ]
-    (outdir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print((outdir / "summary.md").read_text())
+    summary = "\n".join(lines) + "\n"
+    (outdir / "summary.md").write_text(summary, encoding="utf-8")
+    print(summary)
+
 
 if __name__ == "__main__":
     main()
