@@ -1,0 +1,57 @@
+name: FES full-block INT4
+
+on:
+  pull_request:
+    paths:
+      - "experiments/fes-int4/**"
+      - ".github/workflows/fes-int4.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  int4:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - model: EleutherAI/pythia-14m
+            slug: pythia14m
+          - model: EleutherAI/pythia-31m
+            slug: pythia31m
+          - model: EleutherAI/pythia-70m
+            slug: pythia70m
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install transformers datasets scipy
+      - name: Decode helper
+        run: base64 -d experiments/fes-transformer/fes_transformer.py.b64 > experiments/fes-transformer/fes_transformer.py
+      - name: Run INT4 experiment
+        run: |
+          python experiments/fes-int4/fes_int4.py \
+            --model "${{ matrix.model }}" \
+            --out "results-${{ matrix.slug }}" \
+            --cal-windows 2 \
+            --test-windows 16
+          cat "results-${{ matrix.slug }}/summary.md"
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "fes-int4-${{ matrix.slug }}"
+          path: "results-${{ matrix.slug }}/"
+          if-no-files-found: warn
