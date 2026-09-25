@@ -1,0 +1,46 @@
+name: Bonsai robust mask codebook
+
+on:
+  push:
+    branches:
+      - experiment/functional-compression-probe
+    paths:
+      - "bonsai-cv/robust_codebook.py"
+      - ".github/workflows/bonsai-robust-codebook.yml"
+  workflow_dispatch:
+
+jobs:
+  codebook:
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        layer: [0, 7, 14, 21, 27]
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      HF_HOME: "/tmp/hf-cache"
+      CASE_LAYER: ${{ matrix.layer }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install "transformers>=4.57,<5" "datasets>=3,<5" "accelerate>=1,<2" safetensors
+      - name: Run robust codebook
+        working-directory: bonsai-cv
+        run: python robust_codebook.py
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: robust-codebook-l${{ matrix.layer }}
+          path: bonsai-cv/results-robust-codebook/
+          if-no-files-found: warn
