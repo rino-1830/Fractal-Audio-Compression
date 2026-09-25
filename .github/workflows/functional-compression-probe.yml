@@ -30,15 +30,23 @@ jobs:
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
           python -m pip install "transformers>=4.53,<5" "scipy>=1.13,<2" "datasets>=3,<5"
 
-      - name: Run probe
+      - name: Run original probe
         working-directory: llm-functional-compression
         run: python experiment.py
 
-      - name: Publish summary
+      - name: Run disjoint holdout probe
+        working-directory: llm-functional-compression
+        run: python holdout.py
+
+      - name: Publish summaries
         if: always()
         run: |
           if [ -f llm-functional-compression/results/summary.md ]; then
             cat llm-functional-compression/results/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f llm-functional-compression/results-holdout/summary.md ]; then
+            printf "\n\n" >> "$GITHUB_STEP_SUMMARY"
+            cat llm-functional-compression/results-holdout/summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload results
@@ -46,5 +54,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: functional-compression-probe
-          path: llm-functional-compression/results/
+          path: |
+            llm-functional-compression/results/
+            llm-functional-compression/results-holdout/
           if-no-files-found: warn
