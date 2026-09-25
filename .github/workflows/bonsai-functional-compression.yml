@@ -1,0 +1,56 @@
+name: Bonsai functional compression probe
+
+on:
+  push:
+    branches:
+      - experiment/functional-compression-probe
+    paths:
+      - "llm-functional-compression/bonsai_probe.py"
+      - ".github/workflows/bonsai-functional-compression.yml"
+  workflow_dispatch:
+
+jobs:
+  bonsai-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      HF_HOME: "/tmp/hf-cache"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install "transformers>=4.57,<5" "datasets>=3,<5" "scipy>=1.13,<2" "accelerate>=1,<2" safetensors
+
+      - name: Show runner resources
+        run: |
+          free -h
+          df -h .
+
+      - name: Run actual Bonsai probe
+        working-directory: llm-functional-compression
+        run: python bonsai_probe.py
+
+      - name: Publish summary
+        if: always()
+        run: |
+          if [ -f llm-functional-compression/results-bonsai/summary.md ]; then
+            cat llm-functional-compression/results-bonsai/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bonsai-functional-compression-probe
+          path: llm-functional-compression/results-bonsai/
+          if-no-files-found: warn
