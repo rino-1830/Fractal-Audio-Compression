@@ -1,0 +1,51 @@
+name: Bonsai sub-1-bit thinning
+
+on:
+  push:
+    branches:
+      - experiment/functional-compression-probe
+    paths:
+      - "bonsai-cv/onebit_thinning.py"
+      - ".github/workflows/bonsai-onebit-thinning.yml"
+  workflow_dispatch:
+
+jobs:
+  thinning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      HF_HOME: "/tmp/hf-cache"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install "transformers>=4.57,<5" "datasets>=3,<5" "scipy>=1.13,<2" "accelerate>=1,<2" safetensors
+
+      - name: Run sub-1-bit thinning probe
+        working-directory: bonsai-cv
+        run: python onebit_thinning.py
+
+      - name: Publish summary
+        if: always()
+        run: |
+          if [ -f bonsai-cv/results-onebit-thinning/summary.md ]; then
+            cat bonsai-cv/results-onebit-thinning/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bonsai-onebit-thinning
+          path: bonsai-cv/results-onebit-thinning/
+          if-no-files-found: warn
