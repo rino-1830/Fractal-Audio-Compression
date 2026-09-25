@@ -1,0 +1,64 @@
+name: Bonsai validation gate matrix
+
+on:
+  push:
+    branches:
+      - experiment/functional-compression-probe
+    paths:
+      - "bonsai-cv/validation_shard.py"
+      - ".github/workflows/bonsai-validation-matrix.yml"
+  workflow_dispatch:
+
+jobs:
+  shard:
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        include:
+          - { layer: 0,  frac: "0.25", fold: 0 }
+          - { layer: 0,  frac: "0.25", fold: 1 }
+          - { layer: 0,  frac: "0.50", fold: 0 }
+          - { layer: 0,  frac: "0.50", fold: 1 }
+          - { layer: 14, frac: "0.25", fold: 0 }
+          - { layer: 14, frac: "0.25", fold: 1 }
+          - { layer: 14, frac: "0.50", fold: 0 }
+          - { layer: 14, frac: "0.50", fold: 1 }
+          - { layer: 27, frac: "0.25", fold: 0 }
+          - { layer: 27, frac: "0.25", fold: 1 }
+          - { layer: 27, frac: "0.50", fold: 0 }
+          - { layer: 27, frac: "0.50", fold: 1 }
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      HF_HOME: "/tmp/hf-cache"
+      CASE_LAYER: ${{ matrix.layer }}
+      CASE_FRAC: ${{ matrix.frac }}
+      CASE_FOLD: ${{ matrix.fold }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install "transformers>=4.57,<5" "datasets>=3,<5" "scipy>=1.13,<2" "accelerate>=1,<2" safetensors
+
+      - name: Run shard
+        working-directory: bonsai-cv
+        run: python validation_shard.py
+
+      - name: Upload shard result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-l${{ matrix.layer }}-p${{ matrix.frac }}-f${{ matrix.fold }}
+          path: bonsai-cv/results-validation-shard/
+          if-no-files-found: warn
