@@ -1,0 +1,45 @@
+name: FES pretrained Transformer
+
+on:
+  push:
+    branches: ["experiment/fes-transformer-20260926"]
+    paths:
+      - "experiments/fes-transformer/**"
+      - ".github/workflows/fes-transformer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pythia14m:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install transformers datasets scipy
+      - name: Decode experiment
+        run: |
+          base64 -d experiments/fes-transformer/fes_transformer.py.b64 > experiments/fes-transformer/fes_transformer.py
+      - name: Run FES experiment
+        run: |
+          python experiments/fes-transformer/fes_transformer.py --model EleutherAI/pythia-14m --out results-transformer --seq-len 64 --cal-windows 4 --test-windows 8 --topk 32 --beam-width 64 --rerank 8
+          cat results-transformer/summary.md
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fes-transformer-results
+          path: results-transformer/
+          if-no-files-found: warn
