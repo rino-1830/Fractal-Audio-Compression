@@ -1,12 +1,9 @@
-name: FES pretrained Transformer
+name: FES transformer experiment
 
 on:
   push:
-    branches: ["experiment/fes-transformer-20260926"]
-    paths:
-      - "experiments/fes-transformer/**"
-      - ".github/workflows/fes-transformer.yml"
-  pull_request:
+    branches:
+      - "experiment/fes-transformer-20260926"
     paths:
       - "experiments/fes-transformer/**"
       - ".github/workflows/fes-transformer.yml"
@@ -16,11 +13,11 @@ permissions:
   contents: read
 
 jobs:
-  pythia14m:
+  distilgpt2:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     env:
-      HF_HUB_DISABLE_TELEMETRY: "1"
+      OMP_NUM_THREADS: 4
       TOKENIZERS_PARALLELISM: "false"
     steps:
       - uses: actions/checkout@v4
@@ -31,19 +28,37 @@ jobs:
       - name: Install CPU dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
-          python -m pip install transformers datasets scipy
-      - name: Decode experiment
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install transformers numpy
+      - name: Run 4-layer pretrained-transformer FES experiment
         run: |
-          base64 -d experiments/fes-transformer/fes_transformer.py.b64 > experiments/fes-transformer/fes_transformer.py
-      - name: Run FES experiment
+          python experiments/fes-transformer/transformer_fes.py \
+            --model distilgpt2 \
+            --layers 4 \
+            --seq-len 64 \
+            --cal-blocks 4 \
+            --test-blocks 8 \
+            --batch-size 2 \
+            --beam-width 64 \
+            --rerank 6 \
+            --out results/transformer_fes.json
+      - name: Print result summary
         run: |
-          python experiments/fes-transformer/fes_transformer.py --model EleutherAI/pythia-14m --out results-transformer --seq-len 64 --cal-windows 4 --test-windows 8 --topk 32 --beam-width 64 --rerank 8
-          cat results-transformer/summary.md
-      - name: Upload results
-        if: always()
-        uses: actions/upload-artifact@v4
+          python - <<'PY'
+          import json
+          r=json.load(open("results/transformer_fes.json"))
+          print(json.dumps(r["summary"], indent=2))
+          for k,v in r["methods"].items():
+              print(k, {
+                  "test_kl": v["test"]["kl"],
+                  "test_ce": v["test"]["ce"],
+                  "top1": v["test"]["top1_agreement"],
+                  "weight_mse": v["weight_mse_mean"],
+                  "cancel": v["linearized_cancellation_ratio"],
+              })
+          PY
+      - uses: actions/upload-artifact@v4
         with:
           name: fes-transformer-results
-          path: results-transformer/
-          if-no-files-found: warn
+          path: results/
+          if-no-files-found: error
