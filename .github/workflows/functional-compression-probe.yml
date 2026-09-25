@@ -5,7 +5,9 @@ on:
     branches:
       - experiment/functional-compression-probe
     paths:
-      - "llm-functional-compression/**"
+      - "llm-functional-compression/experiment.py"
+      - "llm-functional-compression/holdout.py"
+      - "llm-functional-compression/crossval.py"
       - ".github/workflows/functional-compression-probe.yml"
   workflow_dispatch:
 
@@ -30,31 +32,21 @@ jobs:
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
           python -m pip install "transformers>=4.53,<5" "scipy>=1.13,<2" "datasets>=3,<5"
 
-      - name: Run original probe
+      - name: Run cross-split validation
         working-directory: llm-functional-compression
-        run: python experiment.py
+        run: python crossval.py
 
-      - name: Run disjoint holdout probe
-        working-directory: llm-functional-compression
-        run: python holdout.py
-
-      - name: Publish summaries
+      - name: Publish summary
         if: always()
         run: |
-          if [ -f llm-functional-compression/results/summary.md ]; then
-            cat llm-functional-compression/results/summary.md >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [ -f llm-functional-compression/results-holdout/summary.md ]; then
-            printf "\n\n" >> "$GITHUB_STEP_SUMMARY"
-            cat llm-functional-compression/results-holdout/summary.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -f llm-functional-compression/results-crossval/summary.md ]; then
+            cat llm-functional-compression/results-crossval/summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: functional-compression-probe
-          path: |
-            llm-functional-compression/results/
-            llm-functional-compression/results-holdout/
+          name: functional-compression-crossval
+          path: llm-functional-compression/results-crossval/
           if-no-files-found: warn
