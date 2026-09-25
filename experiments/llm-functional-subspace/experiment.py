@@ -24,17 +24,17 @@ def get_target_layer(model):
     return layers[idx].mlp.dense_4h_to_h, idx
 
 
-def make_blocks(tokenizer, seq_len: int, total_blocks: int):
+def make_blocks(tokenizer, seq_len: int, total_blocks: int, seed: int):
     ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="validation")
     text = "\n".join(x["text"] for x in ds if x["text"].strip())
     ids = tokenizer(text, return_tensors="pt", add_special_tokens=False).input_ids[0]
-    needed = seq_len * total_blocks
-    if ids.numel() < needed:
-        raise RuntimeError(f"Not enough tokens: have {ids.numel()}, need {needed}")
-    # Skip the very beginning to reduce dependence on document headers.
-    start = min(256, max(0, ids.numel() - needed))
-    ids = ids[start : start + needed]
-    return [ids[i * seq_len : (i + 1) * seq_len].unsqueeze(0) for i in range(total_blocks)]
+    # Sample blocks across the validation corpus rather than taking one contiguous region.
+    starts = list(range(256, max(257, ids.numel() - seq_len), seq_len))
+    if len(starts) < total_blocks:
+        raise RuntimeError(f"Not enough candidate blocks: have {len(starts)}, need {total_blocks}")
+    rng = random.Random(seed)
+    chosen = rng.sample(starts, total_blocks)
+    return [ids[s : s + seq_len].unsqueeze(0) for s in chosen]
 
 
 @torch.no_grad()
@@ -251,7 +251,7 @@ def main():
     entropy_bpw = symbol_entropy(codes)
 
     total = args.calib_blocks + args.eval_blocks
-    blocks = make_blocks(tokenizer, args.seq_len, total)
+    blocks = make_blocks(tokenizer, args.seq_len, total, args.seed)
     calib = blocks[: args.calib_blocks]
     eval_blocks = blocks[args.calib_blocks :]
 
@@ -303,11 +303,18 @@ def main():
             metrics = evaluate(model, target, qweight + corr, eval_blocks, teacher_eval)
             qkl = baseline_quant["kl"]
             recovery = (qkl - metrics["kl"]) / qkl if qkl > 1e-12 else 0.0
+            nll_denom = baseline_quant["nll"] - baseline_teacher["nll"]
+            nll_recovery = (
+                (baseline_quant["nll"] - metrics["nll"]) / nll_denom
+                if abs(nll_denom) > 1e-12
+                else 0.0
+            )
             rows.append({
                 "method": method,
                 "rank": rank,
                 "kl": metrics["kl"],
                 "kl_recovery": recovery,
+                "nll_recovery": nll_recovery,
                 "top1_agreement": metrics["top1_agreement"],
                 "nll": metrics["nll"],
                 "ppl": metrics["ppl"],
@@ -356,14 +363,15 @@ def main():
         f"- Quantization-error energy inside failure span: **{failure_proj_energy:.4%}**",
         f"- Quantization-error energy inside success span: **{success_proj_energy:.4%}**",
         "",
-        "| method | rank | KL ↓ | KL recovery ↑ | top-1 agreement ↑ | residual bpw | estimated total bpw |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| method | rank | KL ↓ | KL recovery ↑ | NLL recovery ↑ | top-1 agreement ↑ | residual bpw | estimated total bpw |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         header.append(
             f"| {row['method']} | {row['rank']} | {row['kl']:.6g} | "
-            f"{row['kl_recovery']:.2%} | {row['top1_agreement']:.4%} | "
-            f"{row['residual_bpw_fp16']:.4f} | {row['total_estimated_bpw']:.4f} |"
+            f"{row['kl_recovery']:.2%} | {row['nll_recovery']:.2%} | "
+            f"{row['top1_agreement']:.4%} | {row['residual_bpw_fp16']:.4f} | "
+            f"{row['total_estimated_bpw']:.4f} |"
         )
     header += [
         "",
