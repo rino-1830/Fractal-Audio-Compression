@@ -1,6 +1,12 @@
 name: FES proof of concept
 
 on:
+  push:
+    branches:
+      - "experiment/fes-proof-20260925"
+    paths:
+      - "experiments/fes-proof/**"
+      - ".github/workflows/fes-proof.yml"
   pull_request:
     paths:
       - "experiments/fes-proof/**"
