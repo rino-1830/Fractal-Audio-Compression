@@ -5,7 +5,7 @@ on:
     branches:
       - experiment/functional-compression-probe
     paths:
-      - "bonsai-cv/**"
+      - "bonsai-cv/deep_cv.py"
       - ".github/workflows/bonsai-deep-cv.yml"
   workflow_dispatch:
 
