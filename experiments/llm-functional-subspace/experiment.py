@@ -80,7 +80,7 @@ def cache_teacher(model, target, original_weight, blocks):
     model.eval()
     out = []
     for x in blocks:
-        logits = model(input_ids=x).logits[:, :-1, :].cpu().to(torch.float16)
+        logits = model(input_ids=x).logits[:, :-1, :].detach().float().cpu()
         out.append(logits)
     return out
 
