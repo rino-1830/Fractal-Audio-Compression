@@ -1,0 +1,45 @@
+name: FES Pythia multi-split robustness
+on:
+  push:
+    branches: ["experiment/fes-transformer-20260926"]
+    paths:
+      - "experiments/fes-robustness/**"
+      - ".github/workflows/fes-robustness.yml"
+  pull_request:
+    paths:
+      - "experiments/fes-robustness/**"
+      - ".github/workflows/fes-robustness.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  split:
+    strategy:
+      fail-fast: false
+      matrix:
+        offset: [0, 1024, 2048, 3072]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install transformers datasets
+      - name: Decode shared base
+        run: base64 -d experiments/fes-transformer/fes_transformer.py.b64 > experiments/fes-transformer/fes_transformer.py
+      - name: Exact split experiment
+        run: python experiments/fes-robustness/fes_split.py --offset ${{ matrix.offset }} --out results-${{ matrix.offset }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fes-split-${{ matrix.offset }}
+          path: results-${{ matrix.offset }}/
+          if-no-files-found: warn
