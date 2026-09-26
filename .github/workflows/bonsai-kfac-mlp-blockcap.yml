@@ -38,3 +38,5 @@ jobs:
           name: bonsai-kfac-mlp-blockcap
           path: bonsai-cv/results-kfac-mlp-blockcap/
           if-no-files-found: warn
+
+# retry after syntax fix
