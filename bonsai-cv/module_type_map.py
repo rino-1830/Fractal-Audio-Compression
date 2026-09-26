@@ -66,7 +66,7 @@ def main():
     torch.set_num_threads(2)
     OUT.mkdir(exist_ok=True)
     cal=collect("validation",1500,CAL_N)
-    hold=collect("test",2200,HOLD_N)
+    hold=collect("test",700,HOLD_N)
     tok=AutoTokenizer.from_pretrained(MODEL_ID)
     model=AutoModelForCausalLM.from_pretrained(
       MODEL_ID,torch_dtype=torch.bfloat16,low_cpu_mem_usage=True
