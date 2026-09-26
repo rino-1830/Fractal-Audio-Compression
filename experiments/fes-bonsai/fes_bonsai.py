@@ -100,6 +100,17 @@ def main():
     print("loading bonsai",flush=True)
     model=AutoModelForCausalLM.from_pretrained(bonsai_name,dtype=torch.float32,low_cpu_mem_usage=True)
     model.eval()
+
+    # Qwen3 pads its LM head beyond the tokenizer vocabulary, whereas the
+    # Bonsai checkpoint emits exactly the tokenizer vocabulary. The tokenizers
+    # have identical token->id mappings for all assigned tokens, so compare
+    # distributions on that common assigned vocabulary and renormalize there.
+    common_vocab=len(tok.get_vocab())
+    ref_cal=[x[..., :common_vocab].contiguous() for x in ref_cal]
+    ref_test=[x[..., :common_vocab].contiguous() for x in ref_test]
+    assert model.config.vocab_size == common_vocab, (model.config.vocab_size, common_vocab)
+    print("common_vocab",common_vocab,flush=True)
+
     mods=target_modules(model,args.layers)
     orig=[m.weight.detach().cpu().clone() for _,m in mods]
 
