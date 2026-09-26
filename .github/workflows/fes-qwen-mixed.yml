@@ -1,0 +1,40 @@
+name: FES Qwen ternary mixed-domain robust
+on:
+  push:
+    branches: ["experiment/fes-transformer-20260926"]
+    paths:
+      - "experiments/fes-qwen-mixed/**"
+      - ".github/workflows/fes-qwen-mixed.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  robust:
+    strategy:
+      fail-fast: false
+      matrix:
+        beta: [0.0, 0.5, 1.0]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install transformers datasets accelerate
+      - name: Mixed-domain robust ternary FES
+        run: python experiments/fes-qwen-mixed/fes_qwen_mixed.py --layers 6 --beta ${{ matrix.beta }} --out results-${{ matrix.beta }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fes-qwen-mixed-${{ matrix.beta }}
+          path: results-${{ matrix.beta }}/
+          if-no-files-found: warn
