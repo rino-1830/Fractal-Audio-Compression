@@ -23,7 +23,7 @@ def load_data(tok,seq_len=24,n_cal=4,n_wiki=8,n_pile=8):
     pile=load_dataset("NeelNanda/pile-10k",split="train")
     vtext="\n\n".join(x["text"] for x in val if x["text"].strip())
     ttext="\n\n".join(x["text"] for x in test if x["text"].strip())
-    ptext="\n\n".join(x["text"] for x in pile[:96]["text"] if x.strip())
+    ptext="\n\n".join(x for x in pile[:96]["text"] if x.strip())
     return (
       windows_from_text(tok,vtext,seq_len,n_cal,offset=0),
       windows_from_text(tok,ttext,seq_len,n_wiki,offset=713),
