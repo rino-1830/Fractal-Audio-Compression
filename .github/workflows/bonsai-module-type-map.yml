@@ -1,0 +1,40 @@
+name: Bonsai module-type sensitivity
+
+on:
+  push:
+    branches:
+      - experiment/functional-compression-probe
+    paths:
+      - "bonsai-cv/module_type_map.py"
+      - ".github/workflows/bonsai-module-type-map.yml"
+  workflow_dispatch:
+
+jobs:
+  module-map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      HF_HOME: "/tmp/hf-cache"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install "transformers>=4.57,<5" "datasets>=3,<5" "accelerate>=1,<2" safetensors
+      - name: Run module sensitivity map
+        working-directory: bonsai-cv
+        run: python module_type_map.py
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bonsai-module-type-map
+          path: bonsai-cv/results-module-type-map/
+          if-no-files-found: warn
