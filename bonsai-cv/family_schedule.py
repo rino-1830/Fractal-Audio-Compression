@@ -36,7 +36,7 @@ def collect():
         t=" ".join(row["text"].split())
         if len(t)<100 or t.startswith("="):
             continue
-        if eligible<3300:
+        if eligible<2400:
             eligible+=1
             continue
         xs.append(t[:500])
