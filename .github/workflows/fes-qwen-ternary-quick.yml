@@ -33,3 +33,5 @@ jobs:
           name: fes-qwen-ternary-quick
           path: results-qwen-ternary-quick/
           if-no-files-found: warn
+
+# trigger: quick-qwen-ternary
