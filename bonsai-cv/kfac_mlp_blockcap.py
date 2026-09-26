@@ -10,7 +10,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 MODEL_ID = "prism-ml/Bonsai-1.7B-unpacked"
 MODULES = ["gate_proj", "up_proj", "down_proj"]
 LEVELS = [0.0625, 0.125, 0.1875, 0.25]
-TARGETS = [0.08, 0.10, 0.125, 0.15]\nBLOCK_CAP = 0.50
+TARGETS = [0.08, 0.10, 0.125, 0.15]
+BLOCK_CAP = 0.50
 CAL_N = 4
 HOLD_N = 16
 MAX_LENGTH = 20
