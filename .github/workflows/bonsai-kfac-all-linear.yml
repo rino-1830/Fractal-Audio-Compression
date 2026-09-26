@@ -1,0 +1,40 @@
+name: Bonsai KFAC all-linear waterfill
+
+on:
+  push:
+    branches:
+      - experiment/functional-compression-probe
+    paths:
+      - "bonsai-cv/kfac_all_linear.py"
+      - ".github/workflows/bonsai-kfac-all-linear.yml"
+  workflow_dispatch:
+
+jobs:
+  kfac-all:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      HF_HOME: "/tmp/hf-cache"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install "transformers>=4.57,<5" "datasets>=3,<5" "accelerate>=1,<2" safetensors
+      - name: Run capped KFAC all-linear waterfill
+        working-directory: bonsai-cv
+        run: python kfac_all_linear.py
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bonsai-kfac-all-linear
+          path: bonsai-cv/results-kfac-all-linear/
+          if-no-files-found: warn
