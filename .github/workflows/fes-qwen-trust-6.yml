@@ -1,0 +1,35 @@
+name: FES Qwen normalized trust region 6-layer
+on:
+  push:
+    branches: ["experiment/fes-transformer-20260926"]
+    paths:
+      - ".github/workflows/fes-qwen-trust-6.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  trust6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install transformers datasets accelerate
+      - name: Six-layer normalized trust-region FES
+        run: python experiments/fes-qwen-trust/fes_qwen_trust.py --layers 6 --tau 0.0 --beta 1.0 --out results-trust6
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fes-qwen-trust6
+          path: results-trust6/
+          if-no-files-found: warn
