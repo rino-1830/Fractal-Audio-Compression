@@ -1,0 +1,40 @@
+name: Bonsai pairwise interaction graph
+
+on:
+  push:
+    branches:
+      - experiment/functional-compression-probe
+    paths:
+      - "bonsai-cv/pairwise_interaction.py"
+      - ".github/workflows/bonsai-pairwise-interaction.yml"
+  workflow_dispatch:
+
+jobs:
+  interaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      HF_HOME: "/tmp/hf-cache"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install "transformers>=4.57,<5" "datasets>=3,<5" "accelerate>=1,<2" safetensors
+      - name: Run pairwise interaction graph
+        working-directory: bonsai-cv
+        run: python pairwise_interaction.py
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pairwise-interaction
+          path: bonsai-cv/results-pairwise-interaction/
+          if-no-files-found: warn
