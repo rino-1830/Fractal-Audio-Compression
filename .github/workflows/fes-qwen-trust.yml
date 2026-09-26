@@ -1,0 +1,40 @@
+name: FES Qwen normalized trust region
+on:
+  push:
+    branches: ["experiment/fes-transformer-20260926"]
+    paths:
+      - "experiments/fes-qwen-trust/**"
+      - ".github/workflows/fes-qwen-trust.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  trust:
+    strategy:
+      fail-fast: false
+      matrix:
+        tau: [0.0, 0.01, 0.03]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install transformers datasets accelerate
+      - name: Normalized trust-region FES
+        run: python experiments/fes-qwen-trust/fes_qwen_trust.py --layers 3 --tau ${{ matrix.tau }} --beta 1.0 --out results-${{ matrix.tau }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fes-qwen-trust-${{ matrix.tau }}
+          path: results-${{ matrix.tau }}/
+          if-no-files-found: warn
