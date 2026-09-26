@@ -26,6 +26,11 @@ def metrics(model, ws, ref):
     for ids,rh in zip(ws,ref):
         r=rh.float()
         q=model(input_ids=ids.unsqueeze(0)).logits[0,:-1].float().cpu()
+        # Qwen3-1.7B allocates 267 extra output rows that are absent from both
+        # tokenizers.  The shared 151,669 tokenizer IDs are exactly identical.
+        # Compare the normalized distributions only on that common token space.
+        common=min(r.shape[-1],q.shape[-1])
+        r=r[...,:common]; q=q[...,:common]
         target=ids[1:].cpu()
         rl=F.log_softmax(r,dim=-1); ql=F.log_softmax(q,dim=-1)
         kl+=(rl.exp()*(rl-ql)).sum().item()
