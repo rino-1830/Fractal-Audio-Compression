@@ -1,0 +1,36 @@
+name: FES Bonsai group-scale exact search
+on:
+  push:
+    branches: ["experiment/fes-transformer-20260926"]
+    paths:
+      - "experiments/fes-bonsai-groups/**"
+      - ".github/workflows/fes-bonsai-groups.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install transformers datasets accelerate
+      - name: Exact group-scale FES search
+        run: python experiments/fes-bonsai-groups/fes_bonsai_groups.py --layers 3 --offset 0 --out results-bonsai-groups
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fes-bonsai-groups-results
+          path: results-bonsai-groups/
+          if-no-files-found: warn
