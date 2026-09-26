@@ -157,7 +157,7 @@ def main():
     OUT.mkdir(exist_ok=True)
 
     cal = collect("validation", 1200 + FOLD * 100, CAL_N)
-    hold = collect("test", 2000 + FOLD * 100, HOLD_N)
+    hold = collect("train", 12000 + FOLD * 300, HOLD_N)
 
     tok = AutoTokenizer.from_pretrained(MODEL_ID)
     model = AutoModelForCausalLM.from_pretrained(
