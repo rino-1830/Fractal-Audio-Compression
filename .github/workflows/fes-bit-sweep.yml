@@ -1,0 +1,40 @@
+name: FES PTQ bit-depth sweep
+on:
+  push:
+    branches: ["experiment/fes-transformer-20260926"]
+    paths:
+      - "experiments/fes-bit-sweep/**"
+      - ".github/workflows/fes-bit-sweep.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bits:
+    strategy:
+      fail-fast: false
+      matrix:
+        bits: [2,3,4]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install transformers datasets accelerate
+      - name: Bit-depth FES
+        run: python experiments/fes-bit-sweep/fes_bit_sweep.py --bits ${{ matrix.bits }} --out results-b${{ matrix.bits }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fes-b${{ matrix.bits }}
+          path: results-b${{ matrix.bits }}/
+          if-no-files-found: warn
