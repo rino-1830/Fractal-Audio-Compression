@@ -156,8 +156,8 @@ def main():
     torch.set_num_threads(2)
     OUT.mkdir(exist_ok=True)
 
-    cal = collect("validation", 2100 + FOLD * 80, CAL_N)
-    hold = collect("test", 2600 + FOLD * 80, HOLD_N)
+    cal = collect("validation", 1200 + FOLD * 100, CAL_N)
+    hold = collect("test", 2000 + FOLD * 100, HOLD_N)
 
     tok = AutoTokenizer.from_pretrained(MODEL_ID)
     model = AutoModelForCausalLM.from_pretrained(
