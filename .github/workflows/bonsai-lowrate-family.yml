@@ -1,0 +1,40 @@
+name: Bonsai low-rate family schedule
+
+on:
+  push:
+    branches:
+      - experiment/functional-compression-probe
+    paths:
+      - "bonsai-cv/lowrate_family_schedule.py"
+      - ".github/workflows/bonsai-lowrate-family.yml"
+  workflow_dispatch:
+
+jobs:
+  lowrate-family:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      HF_HOME: "/tmp/hf-cache"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install "transformers>=4.57,<5" "datasets>=3,<5" "accelerate>=1,<2" safetensors
+      - name: Run low-rate family schedule
+        working-directory: bonsai-cv
+        run: python lowrate_family_schedule.py
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bonsai-lowrate-family
+          path: bonsai-cv/results-lowrate-family/
+          if-no-files-found: warn
