@@ -1,0 +1,36 @@
+name: FES on standard INT4 PTQ
+on:
+  push:
+    branches: ["experiment/fes-transformer-20260926"]
+    paths:
+      - "experiments/fes-int4/**"
+      - ".github/workflows/fes-int4.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  int4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install transformers datasets accelerate
+      - name: INT4 FES experiment
+        run: python experiments/fes-int4/fes_int4.py --model EleutherAI/pythia-70m --out results-int4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fes-int4-results
+          path: results-int4/
+          if-no-files-found: warn
