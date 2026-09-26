@@ -30,13 +30,13 @@ SCHEDULES={
 
 
 def collect():
-    ds=load_dataset("Salesforce/wikitext","wikitext-2-raw-v1",split="test")
+    ds=load_dataset("Salesforce/wikitext","wikitext-2-raw-v1",split="train")
     xs=[]; eligible=0
     for row in ds:
         t=" ".join(row["text"].split())
         if len(t)<100 or t.startswith("="):
             continue
-        if eligible<2400:
+        if eligible<14000:
             eligible+=1
             continue
         xs.append(t[:500])
