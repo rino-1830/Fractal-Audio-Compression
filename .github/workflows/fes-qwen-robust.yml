@@ -1,0 +1,37 @@
+name: FES Qwen ternary calibration robustness
+on:
+  push:
+    branches: ["experiment/fes-transformer-20260926"]
+    paths:
+      - "experiments/fes-qwen-robust/**"
+      - ".github/workflows/fes-qwen-robust.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  split:
+    strategy:
+      fail-fast: false
+      matrix:
+        offset: [0,2048,4096,8192]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install transformers datasets accelerate
+      - run: python experiments/fes-qwen-robust/fes_qwen_robust.py --offset ${{ matrix.offset }} --out results-${{ matrix.offset }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fes-qwen-${{ matrix.offset }}
+          path: results-${{ matrix.offset }}/
+          if-no-files-found: warn
