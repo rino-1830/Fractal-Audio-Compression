@@ -1,0 +1,44 @@
+name: FES Pythia scale-up
+on:
+  push:
+    branches: ["experiment/fes-transformer-20260926"]
+    paths:
+      - "experiments/fes-pythia-scale/**"
+      - ".github/workflows/fes-pythia-scale.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scale:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - model: EleutherAI/pythia-70m
+            tag: p70m
+          - model: EleutherAI/pythia-160m
+            tag: p160m
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "4"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install transformers datasets accelerate
+      - name: Scale-up FES
+        run: python experiments/fes-pythia-scale/fes_pythia_scale.py --model ${{ matrix.model }} --passes 2 --out results-${{ matrix.tag }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fes-${{ matrix.tag }}
+          path: results-${{ matrix.tag }}/
+          if-no-files-found: warn
