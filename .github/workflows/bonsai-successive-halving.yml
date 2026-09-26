@@ -1,0 +1,57 @@
+name: Bonsai successive-halving selector
+
+on:
+  push:
+    branches:
+      - experiment/functional-compression-probe
+    paths:
+      - "bonsai-cv/successive_halving_selector.py"
+      - ".github/workflows/bonsai-successive-halving.yml"
+  workflow_dispatch:
+
+jobs:
+  selector:
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        include:
+          - { layer: 0,  fold: 0 }
+          - { layer: 0,  fold: 1 }
+          - { layer: 7,  fold: 0 }
+          - { layer: 7,  fold: 1 }
+          - { layer: 14, fold: 0 }
+          - { layer: 14, fold: 1 }
+          - { layer: 21, fold: 0 }
+          - { layer: 21, fold: 1 }
+          - { layer: 27, fold: 0 }
+          - { layer: 27, fold: 1 }
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      HF_HOME: "/tmp/hf-cache"
+      CASE_LAYER: ${{ matrix.layer }}
+      CASE_FOLD: ${{ matrix.fold }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install "transformers>=4.57,<5" "datasets>=3,<5" "accelerate>=1,<2" safetensors
+      - name: Run successive halving
+        working-directory: bonsai-cv
+        run: python successive_halving_selector.py
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: successive-l${{ matrix.layer }}-f${{ matrix.fold }}
+          path: bonsai-cv/results-successive-halving/
+          if-no-files-found: warn
